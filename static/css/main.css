@@ -1,0 +1,12 @@
+body {
+    background-color: #bdbdbd96;
+}
+
+.carousel-control:hover {
+    background-color: lightgray;
+}
+
+.similarity-form {
+    background-color: white;
+}
+

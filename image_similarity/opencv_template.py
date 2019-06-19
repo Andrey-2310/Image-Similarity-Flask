@@ -1,4 +1,7 @@
 import cv2
+import os
+from numpy import fromstring, uint8
+
 from image_similarity.stats_writer import write_stats_to_file_and_console
 
 from detectors.sift_detector import SiftDetector
@@ -6,7 +9,7 @@ from detectors.surf_detector import SurfDetector
 from detectors.brief_detector import BriefDetector
 from detectors.orb_detector import OrbDetector
 
-init_weight_koef = 0.7
+# init_weight_koef = 0.7
 koef_delta = 0.1
 
 sift_detector = SiftDetector()
@@ -15,47 +18,52 @@ brief_detector = BriefDetector()
 orb_detector = OrbDetector()
 
 detector_map = {
-    "sift": sift_detector,
-    "surf": surf_detector,
-    "brief": brief_detector,
-    "orb": orb_detector
+    "SIFT": sift_detector,
+    "SURF": surf_detector,
+    "BRIEF": brief_detector,
+    "ORB": orb_detector
 }
 
-determiner = "brief"
+# determiner = "BRIEF"
 
 default_similarity_response = 0, 0, 0, 0
 
 
-def main():
+def find_closest_images(detector, weight, original_bytes):
+    original = cv2.imdecode(fromstring(original_bytes, uint8), cv2.IMREAD_UNCHANGED)
+    orig_kp, orig_des = detector_map.get(detector).detect_and_compute(original)
+    return sorted(list(map(lambda image_path: determine_similarity((orig_kp, orig_des), image_path,
+                                                            detector,
+                                                            weight),
+                    find_images_by_path("./static/pictures/DAM"))), key=lambda s: s[1], reverse=True)[0:6]
+
+def determine_similarity(image_kp_des, image2_Path, determiner, weight):
     flann = cv2.FlannBasedMatcher(detector_map.get(determiner).get_index_params(), dict())
-    for x in range(1, 12):
-        for y in range(1, 12):
-            collect_statistics(flann, x, y)
+    return image2_Path, collect_statistics(flann, image_kp_des, image2_Path, determiner, weight)
 
 
-def collect_statistics(flann, image_1, image_2):
-    good_points, number_keypoints, kp1, kp2 = calculate_good_matches(flann, image_1, image_2)
+def collect_statistics(flann, image_kp_des, image_2_path, determiner, weight):
+    good_points, number_keypoints, kp1, kp2 = calculate_good_matches(flann, image_kp_des, image_2_path, determiner, weight)
 
     if number_keypoints == 0:
-        write_stats_to_file_and_console(
-            f"ATTENTION! One of the descriptors for images {image_1}, {image_2} is None\n\n")
-        return
+        print(f"ATTENTION! One of the descriptors is None")
+        return 0
     percentage = round(len(good_points) / number_keypoints * 100, 2)
-    write_stats_to_file_and_console(f'Matching: {percentage}%\nStatus: {get_matching_status(percentage)}\n\n\n')
+    print(f'Matching: {percentage}')
+    return percentage
 
 
 # @timeit
-def calculate_good_matches(flann, image_1, image_2):
-    original = cv2.imread(f'../pictures/brandworkz/Brandworkz-Logo-{image_1}.png', 0)
-    comparable = cv2.imread(f'../pictures/brandworkz/Brandworkz-Logo-{image_2}.png', 0)
+def calculate_good_matches(flann, image_kp_des, image_2_path, determiner, weight):
+    comparable = cv2.imread(image_2_path, 0)
 
-    kp1, des1 = detector_map.get(determiner).detect_and_compute(original)
+    (kp1, des1) = image_kp_des
     kp2, des2 = detector_map.get(determiner).detect_and_compute(comparable)
     if des1 is None or des2 is None:
         return default_similarity_response
     matches = list(filter(lambda x: len(x) == 2, flann.knnMatch(des1, des2, k=2)))
     number_keypoints = len(kp1) if len(kp1) <= len(kp2) else len(kp2)
-    return get_good_points_len(matches, init_weight_koef, number_keypoints), number_keypoints, kp1, kp2
+    return get_good_points_len(matches, weight, number_keypoints), number_keypoints, kp1, kp2
 
 
 def get_good_points_len(matches, weight_koef, min_of_keypoints):
@@ -69,10 +77,9 @@ def get_good_points_len(matches, weight_koef, min_of_keypoints):
         else get_good_points_len(matches, weight_koef - koef_delta, min_of_keypoints)
 
 
-def get_matching_status(percentage):
-    if percentage > 80:
-        return 'Good'
-    if percentage < 30:
-        return 'Bad'
-    else:
-        return 'Normal'
+def find_images_by_path(path):
+    images = list()
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            images.append(os.path.join(root, file))
+    return images
